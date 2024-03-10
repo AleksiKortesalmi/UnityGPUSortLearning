@@ -4,9 +4,11 @@
 // Constants
 #define SORT_THREAD_GROUP_SIZE 512
 #define MERGE_THREAD_GROUP_SIZE 1024
+#define BATCHER_THREAD_GROUP_SIZE 8
 
 #pragma kernel Sort
 #pragma kernel Merge
+#pragma kernel BatcherMerge
 
 uniform uint Count;
 RWBuffer<uint> Data;
@@ -122,7 +124,7 @@ bool isInMergeBounds(uint value)
     return value < MERGE_THREAD_GROUP_SIZE && value >= 0;
 }
 
-// Merge kernel
+// Odd-even transposition merge kernel
 // Double the size to merge 2 sorted sub arrays
 // TODO: Bitonic merge sort is more optimized than the current odd-even transposition
 [numthreads(MERGE_THREAD_GROUP_SIZE, 1, 1)]
@@ -217,4 +219,80 @@ void Merge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 
     
     // Output
     Data[id.x + iOffset] = OddMergePass[GTid.x];
+}
+
+groupshared uint BatcherPass[BATCHER_THREAD_GROUP_SIZE * 2];
+
+void Swap(uint sourceIndex, uint destIndex)
+{
+    uint swap = BatcherPass[sourceIndex];
+    if (BatcherPass[destIndex] < BatcherPass[sourceIndex])
+    {
+        BatcherPass[sourceIndex] = BatcherPass[destIndex];
+        BatcherPass[destIndex] = swap;
+    }
+}
+
+// Batcher's odd-even merge kernel
+// Double the size to merge 2 sorted sub arrays
+// TODO: Bitonic merge sort is more optimized than the current odd-even transposition
+[numthreads(BATCHER_THREAD_GROUP_SIZE, 1, 1)]
+void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
+{
+    // TODO: Handle the last group missing some values (basically determine the groupshared actual count)
+    
+    // Initialize group shared memory with dispatch-level subarray offset
+    // Even pass doesn't have offset because it automically mixes subarrays of 512 in the "even" manner
+    // Odd pass offsets to right by subarray length and last thread group is skipped
+    uint iOffset = isOddDispatch ? BATCHER_THREAD_GROUP_SIZE * 2 : 0;
+    // Skip last thread group during Odd pass
+    if (isOddDispatch && Gid.x == groupCount - 1)
+        return;
+    
+    // Populate groupshared memory with the 2 indices from data handled by this thread (0, 512 or 356, 868 or 511, 1023)
+    BatcherPass[GTid.x] = Data[id.x + iOffset];
+    BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE] = Data[id.x + iOffset + BATCHER_THREAD_GROUP_SIZE];
+    
+    // Wait for others in the group
+    GroupMemoryBarrierWithGroupSync();
+    
+    bool isOddPass = false;
+    
+    const uint passCount = BATCHER_THREAD_GROUP_SIZE;
+    
+    // Start with 2 subarrays and every pass we go "deeper" into the array
+    // Every iteration we merge double the amount of subarrays (of half the length) until we cant and the array is fully sorted
+    for (uint i = 1; i < passCount / 2; i *= 2)
+    {
+        // Pass 1 = Compare smallest even/odd index to largest corresponding (even/odd) index 
+        // (even to even, odd to odd, example with sub arrays of length 8: 0 to 14 and 1 to 15 and 2 to 12...)
+        uint subArrayLength = BATCHER_THREAD_GROUP_SIZE / i;
+        // Index of the subArray where this index should reside
+        uint subArrayIndex = floor(GTid.x / subArrayLength);
+        // Length of the array where the merging takes place
+        uint mergeArrayLength = subArrayIndex * subArrayLength * 2;
+        uint mergeArrayOffset = mergeArrayLength * subArrayIndex;
+        
+        uint sourceIndex = subArrayIndex * subArrayLength + GTid.x;
+        // Source index in the context of the merging array (2 subarrays)
+        uint mergeArraySourceIndex = sourceIndex - mergeArrayOffset;
+        uint destIndex = mergeArrayOffset + subArrayLength * 2 - (sourceIndex % 2 ? 0 : 2) - mergeArraySourceIndex;
+        
+        Swap(sourceIndex, destIndex);
+
+        GroupMemoryBarrierWithGroupSync();
+        
+        // Pass 2 = Compare to next corresponding number 
+        // (even to even, odd to odd, 1 to 3 and 2 to 4 and 5 to 7...)
+        sourceIndex = GTid.x % 2 ? (GTid.x - 1) * 2 + 1 : GTid.x * 2;
+        destIndex = sourceIndex + 2;
+        
+        Swap(sourceIndex, destIndex);
+        
+        GroupMemoryBarrierWithGroupSync();
+    }
+    
+    // Output
+    Data[id.x + iOffset] = BatcherPass[GTid.x];
+    Data[id.x + iOffset + BATCHER_THREAD_GROUP_SIZE] = BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE];
 }
