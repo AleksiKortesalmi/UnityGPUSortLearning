@@ -1,0 +1,220 @@
+// Even-odd sorting (the specific order in this paraller case, algorithm usually referred to as Odd-even)
+// https://www.youtube.com/watch?v=CfrEhUtGV-c
+
+// Constants
+#define SORT_THREAD_GROUP_SIZE 512
+#define MERGE_THREAD_GROUP_SIZE 1024
+
+#pragma kernel Sort
+#pragma kernel Merge
+
+uniform uint Count;
+RWBuffer<uint> Data;
+
+groupshared uint OddSortPass[SORT_THREAD_GROUP_SIZE];
+groupshared uint EvenSortPass[SORT_THREAD_GROUP_SIZE];
+
+bool isOdd(uint value)
+{
+    return value % 2;
+}
+
+bool isInSortBounds(uint value)
+{
+    return value < SORT_THREAD_GROUP_SIZE && value >= 0;
+}
+
+// Sort kernel
+[numthreads(SORT_THREAD_GROUP_SIZE, 1, 1)]
+void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID)
+{
+    // TODO: Handle the last group missing some values (basically determine the groupshared actual count)
+    
+    // Initialize group shared memory
+    OddSortPass[GTid.x] = Data[id.x];
+    
+    // Wait for others in the group
+    GroupMemoryBarrierWithGroupSync();
+    
+    bool isOddPass = false;
+    
+    // If count is odd add one because every Even-Odd cycle has to be completed
+    // assume the array is perfectly dividable by thread count
+    const uint passCount = SORT_THREAD_GROUP_SIZE; //Count % 2 ? Count + 1 : Count;
+
+    for (uint i = 0; i < passCount; i++)
+    {   
+        // Index is odd during odd pass or Index is even during even pass
+        if (GTid.x % 2 && isOddPass || !(GTid.x % 2) && !isOddPass)
+        {
+            // Read from EvenBuffer and change OddBuffer
+            if (isOddPass)
+            {
+                // Value is larger than next and next is in bounds
+                if (isInSortBounds(GTid.x + 1) && EvenSortPass[GTid.x] > EvenSortPass[GTid.x + 1])
+                    // Swap
+                    OddSortPass[GTid.x] = EvenSortPass[GTid.x + 1];
+                else
+                    // Update from last pass
+                    OddSortPass[GTid.x] = EvenSortPass[GTid.x];
+            }
+            // Read from OddBuffer and change EvenBuffer
+            else
+            {
+                // Value is larger than next and next is in bounds
+                if (isInSortBounds(GTid.x + 1) && OddSortPass[GTid.x] > OddSortPass[GTid.x + 1])
+                    // Swap
+                    EvenSortPass[GTid.x] = OddSortPass[GTid.x + 1];
+                else
+                    // Update from last pass
+                    EvenSortPass[GTid.x] = OddSortPass[GTid.x];
+            }
+        }
+        // Index is even during odd pass or Index is odd during even pass
+        else
+        {
+            // Read from EvenBuffer and change OddBuffer
+            if (isOddPass)
+            {
+                // Value is smaller than last and last is in bounds
+                if (isInSortBounds(GTid.x - 1) && EvenSortPass[GTid.x] < EvenSortPass[GTid.x - 1])
+                    // Swap
+                    OddSortPass[GTid.x] = EvenSortPass[GTid.x - 1];
+                else
+                    // Update from last pass
+                    OddSortPass[GTid.x] = EvenSortPass[GTid.x];
+            }
+            // Read from OddBuffer and change EvenBuffer
+            else
+            {
+                // Value is smaller than last and last is in bounds
+                if (isInSortBounds(GTid.x - 1) && OddSortPass[GTid.x] < OddSortPass[GTid.x - 1])
+                    // Swap
+                    EvenSortPass[GTid.x] = OddSortPass[GTid.x - 1];
+                else
+                    // Update from last pass
+                    EvenSortPass[GTid.x] = OddSortPass[GTid.x];
+            }
+        }
+    
+        // Sync (make sure other threads are at the same point)
+        // ONLY SYNCS THREADS IN 1 GROUP
+        // BEHAVIOUR IN DYNAMIC FLOW CONTROL UNDEFINED
+        // https://developer.download.nvidia.com/compute/DevZone/docs/html/DirectCompute/doc/DirectCompute_Programming_Guide.pdf
+        GroupMemoryBarrierWithGroupSync();
+        
+        // Flip for next pass (Odd-Even)
+        isOddPass = !isOddPass;
+    }
+    
+    // Output
+    Data[id.x] = OddSortPass[GTid.x];
+}
+
+uniform bool isOddDispatch;
+uniform uint groupCount;
+
+groupshared uint OddMergePass[MERGE_THREAD_GROUP_SIZE];
+groupshared uint EvenMergePass[MERGE_THREAD_GROUP_SIZE];
+
+bool isInMergeBounds(uint value)
+{
+    return value < MERGE_THREAD_GROUP_SIZE && value >= 0;
+}
+
+// Merge kernel
+// Double the size to merge 2 sorted sub arrays
+// TODO: Bitonic merge sort is more optimized than the current odd-even transposition
+[numthreads(MERGE_THREAD_GROUP_SIZE, 1, 1)]
+void Merge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
+{
+    // TODO: Handle the last group missing some values (basically determine the groupshared actual count)
+    
+    // Initialize group shared memory with dispatch-level subarray offset
+    // Even pass doesn't have offset because it automically mixes subarrays of 512 in the "even" manner
+    // Odd pass offsets to right by subarray length and last thread group is skipped
+    uint iOffset = isOddDispatch ? SORT_THREAD_GROUP_SIZE : 0;
+    // Skip last thread group during Odd pass
+    if (isOddDispatch && Gid.x == groupCount - 1)
+        return;
+    
+    // Thread level index offset
+    OddMergePass[GTid.x] = Data[id.x + iOffset];
+    
+    // Wait for others in the group
+    GroupMemoryBarrierWithGroupSync();
+    
+    bool isOddPass = false;
+    
+    // If count is odd add one because every Even-Odd cycle has to be completed
+    // assume the array is perfectly dividable by thread count
+    const uint passCount = MERGE_THREAD_GROUP_SIZE; //Count % 2 ? Count + 1 : Count;
+
+    for (uint i = 0; i < passCount; i++)
+    {
+        // Index is odd during odd pass or Index is even during even pass
+        if (GTid.x % 2 && isOddPass || !(GTid.x % 2) && !isOddPass)
+        {
+            // Read from EvenBuffer and change OddBuffer
+            if (isOddPass)
+            {
+                // Value is larger than next and next is in bounds
+                if (isInMergeBounds(GTid.x + 1) && EvenMergePass[GTid.x] > EvenMergePass[GTid.x + 1])
+                    // Swap
+                    OddMergePass[GTid.x] = EvenMergePass[GTid.x + 1];
+                else
+                    // Update from last pass
+                    OddMergePass[GTid.x] = EvenMergePass[GTid.x];
+            }
+            // Read from OddBuffer and change EvenBuffer
+            else
+            {
+                // Value is larger than next and next is in bounds
+                if (isInMergeBounds(GTid.x + 1) && OddMergePass[GTid.x] > OddMergePass[GTid.x + 1])
+                    // Swap
+                    EvenMergePass[GTid.x] = OddMergePass[GTid.x + 1];
+                else
+                    // Update from last pass
+                    EvenMergePass[GTid.x] = OddMergePass[GTid.x];
+            }
+        }
+        // Index is even during odd pass or Index is odd during even pass
+        else
+        {
+            // Read from EvenBuffer and change OddBuffer
+            if (isOddPass)
+            {
+                // Value is smaller than last and last is in bounds
+                if (isInMergeBounds(GTid.x - 1) && EvenMergePass[GTid.x] < EvenMergePass[GTid.x - 1])
+                    // Swap
+                    OddMergePass[GTid.x] = EvenMergePass[GTid.x - 1];
+                else
+                    // Update from last pass
+                    OddMergePass[GTid.x] = EvenMergePass[GTid.x];
+            }
+            // Read from OddBuffer and change EvenBuffer
+            else
+            {
+                // Value is smaller than last and last is in bounds
+                if (isInMergeBounds(GTid.x - 1) && OddMergePass[GTid.x] < OddMergePass[GTid.x - 1])
+                    // Swap
+                    EvenMergePass[GTid.x] = OddMergePass[GTid.x - 1];
+                else
+                    // Update from last pass
+                    EvenMergePass[GTid.x] = OddMergePass[GTid.x];
+            }
+        }
+    
+        // Sync (make sure other threads are at the same point)
+        // ONLY SYNCS THREADS IN 1 GROUP
+        // BEHAVIOUR IN DYNAMIC FLOW CONTROL UNDEFINED
+        // https://developer.download.nvidia.com/compute/DevZone/docs/html/DirectCompute/doc/DirectCompute_Programming_Guide.pdf
+        GroupMemoryBarrierWithGroupSync();
+        
+        // Flip for next pass (Odd-Even)
+        isOddPass = !isOddPass;
+    }
+    
+    // Output
+    Data[id.x + iOffset] = OddMergePass[GTid.x];
+}
