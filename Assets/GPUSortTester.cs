@@ -7,8 +7,6 @@ public class GPUSortTester : MonoBehaviour
 {
     [SerializeField] ComputeShader shader;
     [SerializeField] GraphicsBuffer resultBuffer;
-    // Extra buffer used to enable the odd-even transposition sorting
-    [SerializeField] GraphicsBuffer copyBuffer;
 
     const int SORT_WORK_GROUP_SIZE = 1024;
     const int BATCHERMERGE_WORK_GROUP_SIZE = 2048;
@@ -109,7 +107,5 @@ public class GPUSortTester : MonoBehaviour
     {
         resultBuffer?.Release();
         resultBuffer = null;
-        copyBuffer?.Release();
-        copyBuffer = null;
     }
 }
