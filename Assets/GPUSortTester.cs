@@ -3,7 +3,7 @@ using System.Diagnostics;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-public class ShaderDispatcher : MonoBehaviour
+public class GPUSortTester : MonoBehaviour
 {
     [SerializeField] ComputeShader shader;
     [SerializeField] GraphicsBuffer resultBuffer;
@@ -11,11 +11,10 @@ public class ShaderDispatcher : MonoBehaviour
     [SerializeField] GraphicsBuffer copyBuffer;
 
     const int SORT_WORK_GROUP_SIZE = 1024;
-    const int MERGE_THREAD_GROUP_SIZE = 1024;
     const int BATCHERMERGE_WORK_GROUP_SIZE = 2048;
 
     // Length has to be dividable of 2048
-    readonly uint[] data = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 3];
+    readonly uint[] data = new uint[SORT_WORK_GROUP_SIZE * 1055];
 
     void Start()
     {
@@ -28,7 +27,7 @@ public class ShaderDispatcher : MonoBehaviour
         }
 
         // Debug only
-        //ShowData();
+        ShowData();
 
         Debug.Log("Sorting...");
 
@@ -94,12 +93,13 @@ public class ShaderDispatcher : MonoBehaviour
         TimeSpan elapsedTime = stopwatch.Elapsed;
 
         // Print the duration in seconds
+        Debug.Log("Array length: " + data.Length);
         Debug.Log("Execution Time: " + elapsedTime.TotalMilliseconds + " milliseconds");
     }
 
     void ShowData()
     {
-        for (int i = 0; i < data.Length; i += 1)
+        for (int i = 0; i < data.Length; i += data.Length / 8)
         {
             Debug.Log("i: " + i + ", val: " + data[i]);
         }
