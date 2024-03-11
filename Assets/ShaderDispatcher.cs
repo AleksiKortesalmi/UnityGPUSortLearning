@@ -10,11 +10,11 @@ public class ShaderDispatcher : MonoBehaviour
     // Extra buffer used to enable the odd-even transposition sorting
     [SerializeField] GraphicsBuffer copyBuffer;
 
-    const int SORT_THREAD_GROUP_SIZE = 512;
+    const int SORT_WORK_GROUP_SIZE = 1024;
     const int MERGE_THREAD_GROUP_SIZE = 1024;
 
     // Length has to be dividable of 1024
-    readonly uint[] data = new uint[1024 * 135];
+    readonly uint[] data = new uint[SORT_WORK_GROUP_SIZE * 100];
 
     void Start()
     {
@@ -25,6 +25,8 @@ public class ShaderDispatcher : MonoBehaviour
         {
             data[i] = (uint)data.Length - i - 1;
         }
+
+        //ShowData();
 
         Debug.Log("Sorting...");
 
@@ -46,7 +48,7 @@ public class ShaderDispatcher : MonoBehaviour
 
         shader.SetInt("Count", data.Length);
 
-        int numThreadGroups = Mathf.CeilToInt((float)data.Length / SORT_THREAD_GROUP_SIZE);
+        int numThreadGroups = Mathf.CeilToInt((float)data.Length / SORT_WORK_GROUP_SIZE);
 
         // SORT
         shader.Dispatch(sortKernelIndex, numThreadGroups, 1, 1);
@@ -54,8 +56,8 @@ public class ShaderDispatcher : MonoBehaviour
         //Debug.Log("Merging...");
 
         // MERGE
-        bool isOddDispatch = false;
-        int passCount = data.Length / SORT_THREAD_GROUP_SIZE;
+        /*bool isOddDispatch = false;
+        int passCount = data.Length / SORT_WORK_GROUP_SIZE;
         numThreadGroups = Mathf.CeilToInt((float)data.Length / MERGE_THREAD_GROUP_SIZE);
 
         //Debug.Log("Passcount: " + passCount);
@@ -66,7 +68,7 @@ public class ShaderDispatcher : MonoBehaviour
             shader.Dispatch(mergeKernelIndex, numThreadGroups, 1, 1);
 
             isOddDispatch = !isOddDispatch;
-        }
+        }*/
 
         resultBuffer.GetData(data);
 
@@ -86,7 +88,7 @@ public class ShaderDispatcher : MonoBehaviour
 
     void ShowData()
     {
-        for (int i = 0; i < data.Length; i += 512)
+        for (int i = 0; i < data.Length; i += 1)
         {
             Debug.Log("i: " + i + ", val: " + data[i]);
         }

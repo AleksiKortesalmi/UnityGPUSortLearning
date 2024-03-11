@@ -10,16 +10,15 @@ public class BatcherMergeTest : MonoBehaviour
     // Extra buffer used to enable the odd-even transposition sorting
     [SerializeField] GraphicsBuffer copyBuffer;
 
-    const int SORT_THREAD_GROUP_SIZE = 512;
-    const int MERGE_THREAD_GROUP_SIZE = 1024;
-    const int BATCHER_THREAD_GROUP_SIZE = 8;
-    const int BATCHER_WORK_GROUP_SIZE = 16;
+    const int BATCHER_WORK_GROUP_SIZE = 32;
 
     // Length has to be dividable of 1024
-    readonly uint[] data = new uint[] { 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7 };
+    readonly uint[] data = new uint[] { 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
 
     void Start()
     {
+        Debug.Log("Length: " + data.Length);
+
         ShowData();
 
         Debug.Log("Merging...");

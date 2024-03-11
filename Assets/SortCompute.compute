@@ -4,7 +4,7 @@
 // Constants
 #define SORT_THREAD_GROUP_SIZE 512
 #define MERGE_THREAD_GROUP_SIZE 1024
-#define BATCHER_THREAD_GROUP_SIZE 8
+#define BATCHER_THREAD_GROUP_SIZE 16
 
 #pragma kernel Sort
 #pragma kernel Merge
@@ -13,8 +13,8 @@
 uniform uint Count;
 RWBuffer<uint> Data;
 
-groupshared uint OddSortPass[SORT_THREAD_GROUP_SIZE];
-groupshared uint EvenSortPass[SORT_THREAD_GROUP_SIZE];
+groupshared uint SortPass[SORT_THREAD_GROUP_SIZE * 2];
+
 
 bool isOdd(uint value)
 {
@@ -23,17 +23,29 @@ bool isOdd(uint value)
 
 bool isInSortBounds(uint value)
 {
-    return value < SORT_THREAD_GROUP_SIZE && value >= 0;
+    return value < SORT_THREAD_GROUP_SIZE * 2 && value >= 0;
+}
+
+void SortSwap(uint sourceIndex, uint destIndex)
+{
+    uint swap = SortPass[sourceIndex];
+    if (SortPass[destIndex] < SortPass[sourceIndex])
+    {
+        SortPass[sourceIndex] = SortPass[destIndex];
+        SortPass[destIndex] = swap;
+    }
 }
 
 // Sort kernel
 [numthreads(SORT_THREAD_GROUP_SIZE, 1, 1)]
-void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID)
+void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
 {
     // TODO: Handle the last group missing some values (basically determine the groupshared actual count)
     
-    // Initialize group shared memory
-    OddSortPass[GTid.x] = Data[id.x];
+    // Populate groupshared memory with the 2 indices from data handled by this thread (0, 512 or 356, 868 or 511, 1023)
+    uint groupIndexOffset = Gid.x * SORT_THREAD_GROUP_SIZE;
+    SortPass[GTid.x] = Data[id.x + groupIndexOffset];
+    SortPass[GTid.x + SORT_THREAD_GROUP_SIZE] = Data[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
     
     // Wait for others in the group
     GroupMemoryBarrierWithGroupSync();
@@ -42,62 +54,26 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID)
     
     // If count is odd add one because every Even-Odd cycle has to be completed
     // assume the array is perfectly dividable by thread count
-    const uint passCount = SORT_THREAD_GROUP_SIZE; //Count % 2 ? Count + 1 : Count;
+    const uint passCount = SORT_THREAD_GROUP_SIZE * 2; //Count % 2 ? Count + 1 : Count;
 
+    uint sourceIndex = 0;
+    uint destIndex = 0;
+    uint offset = 1;
+    
     for (uint i = 0; i < passCount; i++)
-    {   
-        // Index is odd during odd pass or Index is even during even pass
-        if (GTid.x % 2 && isOddPass || !(GTid.x % 2) && !isOddPass)
+    {
+        sourceIndex = isOddPass ? GTid.x * 2 + 1 : GTid.x * 2;
+        destIndex = sourceIndex + 1;
+        
+        // Handle odd pass last index from going out of bounds
+        if (isOddPass && !isInSortBounds(destIndex))
         {
-            // Read from EvenBuffer and change OddBuffer
-            if (isOddPass)
-            {
-                // Value is larger than next and next is in bounds
-                if (isInSortBounds(GTid.x + 1) && EvenSortPass[GTid.x] > EvenSortPass[GTid.x + 1])
-                    // Swap
-                    OddSortPass[GTid.x] = EvenSortPass[GTid.x + 1];
-                else
-                    // Update from last pass
-                    OddSortPass[GTid.x] = EvenSortPass[GTid.x];
-            }
-            // Read from OddBuffer and change EvenBuffer
-            else
-            {
-                // Value is larger than next and next is in bounds
-                if (isInSortBounds(GTid.x + 1) && OddSortPass[GTid.x] > OddSortPass[GTid.x + 1])
-                    // Swap
-                    EvenSortPass[GTid.x] = OddSortPass[GTid.x + 1];
-                else
-                    // Update from last pass
-                    EvenSortPass[GTid.x] = OddSortPass[GTid.x];
-            }
+            sourceIndex = 0;
+            destIndex = SORT_THREAD_GROUP_SIZE * 2 - 1;
         }
-        // Index is even during odd pass or Index is odd during even pass
-        else
-        {
-            // Read from EvenBuffer and change OddBuffer
-            if (isOddPass)
-            {
-                // Value is smaller than last and last is in bounds
-                if (isInSortBounds(GTid.x - 1) && EvenSortPass[GTid.x] < EvenSortPass[GTid.x - 1])
-                    // Swap
-                    OddSortPass[GTid.x] = EvenSortPass[GTid.x - 1];
-                else
-                    // Update from last pass
-                    OddSortPass[GTid.x] = EvenSortPass[GTid.x];
-            }
-            // Read from OddBuffer and change EvenBuffer
-            else
-            {
-                // Value is smaller than last and last is in bounds
-                if (isInSortBounds(GTid.x - 1) && OddSortPass[GTid.x] < OddSortPass[GTid.x - 1])
-                    // Swap
-                    EvenSortPass[GTid.x] = OddSortPass[GTid.x - 1];
-                else
-                    // Update from last pass
-                    EvenSortPass[GTid.x] = OddSortPass[GTid.x];
-            }
-        }
+        
+        // Try swap
+        SortSwap(sourceIndex, destIndex);
     
         // Sync (make sure other threads are at the same point)
         // ONLY SYNCS THREADS IN 1 GROUP
@@ -110,7 +86,8 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID)
     }
     
     // Output
-    Data[id.x] = OddSortPass[GTid.x];
+    Data[id.x + groupIndexOffset] = SortPass[GTid.x];
+    Data[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPass[GTid.x + SORT_THREAD_GROUP_SIZE];
 }
 
 uniform bool isOddDispatch;
@@ -223,7 +200,7 @@ void Merge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 
 
 groupshared uint BatcherPass[BATCHER_THREAD_GROUP_SIZE * 2];
 
-void Swap(uint sourceIndex, uint destIndex)
+void BatcherSwap(uint sourceIndex, uint destIndex)
 {
     uint swap = BatcherPass[sourceIndex];
     if (BatcherPass[destIndex] < BatcherPass[sourceIndex])
@@ -270,7 +247,7 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
         // Index of the subArray where this index should reside
         uint subArrayIndex = floor(GTid.x / subArrayLength);
         // Length of the array where the merging takes place
-        uint mergeArrayLength = subArrayIndex * subArrayLength * 2;
+        uint mergeArrayLength = subArrayLength * 2;
         uint mergeArrayOffset = mergeArrayLength * subArrayIndex;
         
         uint sourceIndex = subArrayIndex * subArrayLength + GTid.x;
@@ -278,7 +255,7 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
         uint mergeArraySourceIndex = sourceIndex - mergeArrayOffset;
         uint destIndex = mergeArrayOffset + subArrayLength * 2 - (sourceIndex % 2 ? 0 : 2) - mergeArraySourceIndex;
         
-        Swap(sourceIndex, destIndex);
+        BatcherSwap(sourceIndex, destIndex);
 
         GroupMemoryBarrierWithGroupSync();
         
@@ -287,7 +264,7 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
         sourceIndex = GTid.x % 2 ? (GTid.x - 1) * 2 + 1 : GTid.x * 2;
         destIndex = sourceIndex + 2;
         
-        Swap(sourceIndex, destIndex);
+        BatcherSwap(sourceIndex, destIndex);
         
         GroupMemoryBarrierWithGroupSync();
     }
