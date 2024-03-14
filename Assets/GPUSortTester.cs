@@ -1,18 +1,20 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
+using Random = UnityEngine.Random;
 
 public class GPUSortTester : MonoBehaviour
 {
     [SerializeField] ComputeShader shader;
     [SerializeField] GraphicsBuffer resultBuffer;
 
-    const int SORT_WORK_GROUP_SIZE = 1024;
-    const int BATCHERMERGE_WORK_GROUP_SIZE = 2048;
+    const int SORT_WORK_GROUP_SIZE = 256;
+    const int BATCHERMERGE_WORK_GROUP_SIZE = 512;
 
     // Length has to be dividable of 2048
-    readonly uint[] data = new uint[SORT_WORK_GROUP_SIZE * 1055];
+    readonly uint[] data = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 100];
 
     void Start()
     {
@@ -21,7 +23,7 @@ public class GPUSortTester : MonoBehaviour
         // Fill with worst case
         for (uint i = 0; i < data.Length; i++)
         {
-            data[i] = (uint)data.Length - i - 1;
+            data[i] = (uint)Random.Range(0, data.Length * 4);
         }
 
         // Debug only
@@ -53,8 +55,8 @@ public class GPUSortTester : MonoBehaviour
         shader.Dispatch(sortKernelIndex, numThreadGroups, 1, 1);
 
         // DEBUG ONLY
-        /*resultBuffer.GetData(data);
-        ShowData();*/
+        //resultBuffer.GetData(data);
+        //ShowData();
 
         Debug.Log("Merging...");
 
@@ -63,7 +65,7 @@ public class GPUSortTester : MonoBehaviour
         int passCount = data.Length / SORT_WORK_GROUP_SIZE;
         numThreadGroups = Mathf.CeilToInt((float)data.Length / BATCHERMERGE_WORK_GROUP_SIZE);
 
-        //Debug.Log("Passcount: " + passCount);
+        Debug.Log("Passcount: " + passCount);
         shader.SetInt("groupCount", numThreadGroups);
         for (int i = 0; i < passCount; i++)
         {
@@ -71,9 +73,9 @@ public class GPUSortTester : MonoBehaviour
             shader.Dispatch(batcherKernelIndex, numThreadGroups, 1, 1);
 
             // DEBUG ONLY
-            /*resultBuffer.GetData(data);
-            Debug.Log("Merge pass " +  i + ":");
-            ShowData();*/
+            //resultBuffer.GetData(data);
+            //Debug.Log("Merge pass " +  i + ":");
+            //ShowData();
 
             isOddDispatch = !isOddDispatch;
         }
@@ -97,10 +99,25 @@ public class GPUSortTester : MonoBehaviour
 
     void ShowData()
     {
+        int errors = 0;
+        List<uint> errorIndices = new List<uint>();
+
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (i + 1 < data.Length && data[i] > data[i + 1])
+            {
+                errors++;
+
+                errorIndices.Add((uint)i + 1);
+            }
+        }
+
         for (int i = 0; i < data.Length; i += data.Length / 8)
         {
             Debug.Log("i: " + i + ", val: " + data[i]);
         }
+
+        Debug.Log(errors + " errors, indices: " + string.Join(", ", errorIndices));
     }
 
     private void OnDestroy()

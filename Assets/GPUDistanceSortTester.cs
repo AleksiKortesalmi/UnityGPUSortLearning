@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
@@ -10,17 +12,17 @@ public class GPUDistanceSortTester : MonoBehaviour
     [SerializeField] GraphicsBuffer indexBuffer;
     [SerializeField] GraphicsBuffer valueBuffer;
 
-    const int SORT_WORK_GROUP_SIZE = 1024;
-    const int BATCHERMERGE_WORK_GROUP_SIZE = 2048;
+    const int SORT_WORK_GROUP_SIZE = 256;
+    const int BATCHERMERGE_WORK_GROUP_SIZE = 512;
 
-    const int TEST_ARRAY_LENGTH_MULTIPLIER = 1000;
+    const int TEST_ARRAY_LENGTH_MULTIPLIER = 100;
 
     [SerializeField]
     bool randomizeVectors = false;
 
     // Length has to be dividable of 2048
-    readonly uint[] indices = new uint[SORT_WORK_GROUP_SIZE * TEST_ARRAY_LENGTH_MULTIPLIER];
-    readonly Vector3[] values = new Vector3[SORT_WORK_GROUP_SIZE * TEST_ARRAY_LENGTH_MULTIPLIER];
+    readonly uint[] indices = new uint[BATCHERMERGE_WORK_GROUP_SIZE * TEST_ARRAY_LENGTH_MULTIPLIER];
+    readonly Vector3[] values = new Vector3[BATCHERMERGE_WORK_GROUP_SIZE * TEST_ARRAY_LENGTH_MULTIPLIER];
     readonly Vector3 target = Vector3.zero;
 
     private void Start()
@@ -43,7 +45,7 @@ public class GPUDistanceSortTester : MonoBehaviour
             if(randomizeVectors)
                 values[i] = new Vector3(Random.Range(0.0f, 1000f), Random.Range(0.0f, 1000f), Random.Range(0.0f, 1000f));
             else
-                values[i] = new Vector3(values.Length - i - 1, values.Length - i - 1, values.Length - i - 1);
+                values[i] = new Vector3(Random.Range(0, 10) - i - .5f, Random.Range(0, 10) - i - .5f, Random.Range(0, 10) - i -.5f);
         }
 
         // Debug only
@@ -82,8 +84,8 @@ public class GPUDistanceSortTester : MonoBehaviour
         shader.Dispatch(sortKernelIndex, numThreadGroups, 1, 1);
 
         // DEBUG ONLY
-        /*resultBuffer.GetData(data);
-        ShowData();*/
+        //indexBuffer.GetData(indices);
+        //ShowData();
 
         Debug.Log("Merging...");
 
@@ -92,7 +94,7 @@ public class GPUDistanceSortTester : MonoBehaviour
         int passCount = indices.Length / SORT_WORK_GROUP_SIZE;
         numThreadGroups = Mathf.CeilToInt((float)indices.Length / BATCHERMERGE_WORK_GROUP_SIZE);
 
-        //Debug.Log("Passcount: " + passCount);
+        Debug.Log("Passcount: " + passCount);
         shader.SetInt("groupCount", numThreadGroups);
         for (int i = 0; i < passCount; i++)
         {
@@ -100,9 +102,9 @@ public class GPUDistanceSortTester : MonoBehaviour
             shader.Dispatch(batcherKernelIndex, numThreadGroups, 1, 1);
 
             // DEBUG ONLY
-            /*resultBuffer.GetData(data);
-            Debug.Log("Merge pass " +  i + ":");
-            ShowData();*/
+            //indexBuffer.GetData(indices);
+            //Debug.Log("Merge pass " +  i + ":");
+            //ShowData();
 
             isOddDispatch = !isOddDispatch;
         }
@@ -126,9 +128,29 @@ public class GPUDistanceSortTester : MonoBehaviour
 
     void ShowData()
     {
-        for (int i = 0; i < values.Length; i += indices.Length / 8)
+        int errors = 0;
+        List<uint> errorIndices = new List<uint>();
+
+        for (int i = 0; i < indices.Length; i++)
+        {
+            // Rounded because of false errors
+            if (i + 1 < indices.Length && Math.Round(Vector3.Distance(values[indices[i + 1]], target), 3) < Math.Round(Vector3.Distance(values[indices[i]], target), 3))
+            {
+                errorIndices.Add((uint)i + 1);
+                errors++;
+            }
+        }
+
+        for (int i = 0; i < indices.Length; i += indices.Length / 8)
         {
             Debug.Log("i: " + i + ", value index: " + indices[i] + ", val: " + values[indices[i]] + ", dist: " + Vector3.Distance(values[indices[i]], target));
+        }
+
+        Debug.Log(errors + " errors, indices: " + string.Join(", ", errorIndices));
+        for (int i = 0; i < errorIndices.Count; i++)
+        {
+            Debug.Log("At index: " + (errorIndices[i] - 1) + ": " + Vector3.Distance(values[indices[errorIndices[i] - 1]], target));
+            Debug.Log("At index: " + errorIndices[i] + ": " + Vector3.Distance(values[indices[errorIndices[i]]], target));
         }
     }
 
