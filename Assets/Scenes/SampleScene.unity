@@ -393,7 +393,9 @@ GameObject:
   m_Component:
   - component: {fileID: 2001382753}
   - component: {fileID: 2001382754}
+  - component: {fileID: 2001382757}
   - component: {fileID: 2001382755}
+  - component: {fileID: 2001382756}
   m_Layer: 0
   m_Name: TransformSorter
   m_TagString: Untagged
@@ -441,6 +443,40 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a8fe831119be35a4d886c58c258f97e4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  startArrayLength: 500000
+  benchmarkCount: 3
+  lengthIncreasePerBenchmark: 250000
+  benchmarkPassCount: 10
+  prefab: {fileID: 627422512132017797, guid: 3f8352a208428754da661a356c89e166, type: 3}
+  sortUtility: {fileID: 2001382754}
+--- !u!114 &2001382756
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2001382752}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e003bac3ed945b345bdc35d0c87d3b69, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  output: 
+  stack: 
+  maxLines: 100
+--- !u!114 &2001382757
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2001382752}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1887dc069be2a64db864b410fbbad3f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  testLength: 260682
   prefab: {fileID: 627422512132017797, guid: 3f8352a208428754da661a356c89e166, type: 3}
   sortUtility: {fileID: 2001382754}
 --- !u!1660057539 &9223372036854775807

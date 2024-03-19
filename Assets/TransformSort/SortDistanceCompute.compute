@@ -2,8 +2,8 @@
 // https://www.youtube.com/watch?v=CfrEhUtGV-c
 
 // Constants
-#define SORT_THREAD_GROUP_SIZE 128
-#define BATCHER_THREAD_GROUP_SIZE 256
+#define SORT_THREAD_GROUP_SIZE 16
+#define BATCHER_THREAD_GROUP_SIZE 2 * SORT_THREAD_GROUP_SIZE
 
 #pragma kernel Sort
 #pragma kernel BatcherMerge
@@ -142,11 +142,6 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     // Pass 1 = Compare same indices from the 2 subarrays
     // (even to even, odd to odd, example with sub arrays of length 8: 0 to 14 and 1 to 15 and 2 to 12...)
     uint subArrayLength = BATCHER_THREAD_GROUP_SIZE;
-    // Index of the subArray where this index should reside
-    uint subArrayIndex = floor(GTid.x / subArrayLength);
-    // Length of the array where the merging takes place
-    uint mergeArrayLength = subArrayLength * 2;
-    uint mergeArrayOffset = mergeArrayLength * subArrayIndex;
     
     uint sourceIndex = 0;
     uint destIndex = 0;
