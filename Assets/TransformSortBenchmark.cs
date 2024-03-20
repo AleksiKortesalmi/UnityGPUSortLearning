@@ -10,18 +10,9 @@ using Random = UnityEngine.Random;
 
 public class TransformSortBenchmark : MonoBehaviour
 {
-    [SerializeField]
-    [Range(GPUDistanceSort.MIN_ARRAY_LENGTH, 1000000)]
-    int startArrayLength = 1;
-    [SerializeField]
-    [Range(1, 10)]
-    int benchmarkCount = 5;
-    [SerializeField]
-    [Range(0, GPUDistanceSort.MIN_ARRAY_LENGTH * 10000)]
-    int lengthIncreasePerBenchmark = 1024;
-    [SerializeField]
-    [Range(1, 10)]
-    int benchmarkPassCount = 5;
+    int startArrayLength = 64;
+    int benchmarkCount = 15;
+    int benchmarkPassCount = 10000;
 
     [SerializeField]
     GameObject prefab;
@@ -86,7 +77,8 @@ public class TransformSortBenchmark : MonoBehaviour
 
             if (benchmarkCounter < benchmarkCount)
             {
-                startArrayLength += lengthIncreasePerBenchmark;
+                startArrayLength *= 2;
+                benchmarkPassCount = Math.Max(benchmarkPassCount / 2, 10);
 
                 Init();
 

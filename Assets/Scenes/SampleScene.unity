@@ -443,10 +443,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a8fe831119be35a4d886c58c258f97e4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  startArrayLength: 500000
-  benchmarkCount: 3
-  lengthIncreasePerBenchmark: 250000
-  benchmarkPassCount: 10
+  startArrayLength: 2500
+  benchmarkCount: 1
+  lengthIncreasePerBenchmark: 0
+  benchmarkPassCount: 1000
   prefab: {fileID: 627422512132017797, guid: 3f8352a208428754da661a356c89e166, type: 3}
   sortUtility: {fileID: 2001382754}
 --- !u!114 &2001382756
