@@ -15,8 +15,8 @@ public class DistanceSortTester : MonoBehaviour
     const int BATCHERMERGE_WORK_GROUP_SIZE = 128;
 
     // Length has to be dividable of 2048
-    readonly uint[] Indices = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 1000];
-    readonly uint[] Distances = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 1000];
+    readonly uint[] Indices = new uint[154];
+    readonly uint[] Distances = new uint[154];
 
     void Start()
     {
@@ -64,9 +64,9 @@ public class DistanceSortTester : MonoBehaviour
         shader.Dispatch(sortKernelIndex, numThreadGroups, 1, 1);
 
         // DEBUG ONLY
-        //indicesBuffer.GetData(Indices);
-        //distancesBuffer.GetData(Distances);
-        //ShowData();
+        indicesBuffer.GetData(Indices);
+        distancesBuffer.GetData(Distances);
+        ShowData();
 
         Debug.Log("Merging...");
 
