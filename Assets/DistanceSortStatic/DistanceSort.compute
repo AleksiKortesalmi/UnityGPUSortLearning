@@ -2,8 +2,8 @@
 // https://www.youtube.com/watch?v=CfrEhUtGV-c
 
 // Constants
-#define SORT_THREAD_GROUP_SIZE 128
-#define BATCHER_THREAD_GROUP_SIZE 256
+#define SORT_THREAD_GROUP_SIZE 32
+#define BATCHER_THREAD_GROUP_SIZE 64
 
 #pragma kernel Sort
 #pragma kernel BatcherMerge
@@ -13,6 +13,7 @@ RWBuffer<uint> Indices;
 RWBuffer<uint> Distances;
 
 groupshared uint SortPass[SORT_THREAD_GROUP_SIZE * 2];
+groupshared uint SortPassDistances[SORT_THREAD_GROUP_SIZE * 2];
 
 bool isOdd(uint value)
 {
@@ -26,11 +27,14 @@ bool isInSortBounds(uint value)
 
 void SortSwap(uint sourceIndex, uint destIndex)
 {
-    uint swap = SortPass[sourceIndex];
-    if (SortPass[destIndex] < SortPass[sourceIndex])
+    if (SortPassDistances[destIndex] < SortPassDistances[sourceIndex])
     {
+        uint swap = SortPass[sourceIndex];
+        uint distSwap = SortPassDistances[sourceIndex];
         SortPass[sourceIndex] = SortPass[destIndex];
         SortPass[destIndex] = swap;
+        SortPassDistances[sourceIndex] = SortPassDistances[destIndex];
+        SortPassDistances[destIndex] = distSwap;
     }
 }
 
@@ -44,6 +48,9 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
     uint groupIndexOffset = Gid.x * SORT_THREAD_GROUP_SIZE;
     SortPass[GTid.x] = Indices[id.x + groupIndexOffset];
     SortPass[GTid.x + SORT_THREAD_GROUP_SIZE] = Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
+    
+    SortPassDistances[GTid.x] = Distances[id.x + groupIndexOffset];
+    SortPassDistances[GTid.x + SORT_THREAD_GROUP_SIZE] = Distances[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
     
     // Wait for others in the group
     GroupMemoryBarrierWithGroupSync();
@@ -85,20 +92,27 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
     // Output
     Indices[id.x + groupIndexOffset] = SortPass[GTid.x];
     Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPass[GTid.x + SORT_THREAD_GROUP_SIZE];
+    
+    Distances[id.x + groupIndexOffset] = SortPassDistances[GTid.x];
+    Distances[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPassDistances[GTid.x + SORT_THREAD_GROUP_SIZE];
 }
 
 uniform bool isOddDispatch;
 uniform uint groupCount;
 
 groupshared uint BatcherPass[BATCHER_THREAD_GROUP_SIZE * 2];
+groupshared uint BatcherPassDistances[BATCHER_THREAD_GROUP_SIZE * 2];
 
 void BatcherSwap(uint sourceIndex, uint destIndex)
 {
-    uint swap = BatcherPass[sourceIndex];
-    if (BatcherPass[destIndex] < BatcherPass[sourceIndex])
+    if (BatcherPassDistances[destIndex] < BatcherPassDistances[sourceIndex])
     {
+        uint swap = BatcherPass[sourceIndex];
+        uint distSwap = BatcherPassDistances[sourceIndex];
         BatcherPass[sourceIndex] = BatcherPass[destIndex];
         BatcherPass[destIndex] = swap;
+        BatcherPassDistances[sourceIndex] = BatcherPassDistances[destIndex];
+        BatcherPassDistances[destIndex] = distSwap;
     }
 }
 
@@ -123,6 +137,9 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     uint groupIndexOffset = Gid.x * BATCHER_THREAD_GROUP_SIZE;
     BatcherPass[GTid.x] = Indices[id.x + groupIndexOffset + iOffset];
     BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE] = Indices[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset];
+    
+    BatcherPassDistances[GTid.x] = Distances[id.x + groupIndexOffset + iOffset];
+    BatcherPassDistances[GTid.x + BATCHER_THREAD_GROUP_SIZE] = Distances[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset];
     
     // Wait for others in the group
     GroupMemoryBarrierWithGroupSync();
@@ -164,4 +181,7 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     // Output
     Indices[id.x + groupIndexOffset + iOffset] = BatcherPass[GTid.x];
     Indices[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset] = BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE];
+    
+    Distances[id.x + groupIndexOffset + iOffset] = BatcherPassDistances[GTid.x];
+    Distances[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset] = BatcherPassDistances[GTid.x + BATCHER_THREAD_GROUP_SIZE];
 }

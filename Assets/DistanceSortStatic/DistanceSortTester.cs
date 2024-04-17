@@ -5,18 +5,18 @@ using UnityEngine;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
-public class SortTester : MonoBehaviour
+public class DistanceSortTester : MonoBehaviour
 {
     [SerializeField] ComputeShader shader;
     GraphicsBuffer indicesBuffer;
     GraphicsBuffer distancesBuffer;
 
-    const int SORT_WORK_GROUP_SIZE = 256;
-    const int BATCHERMERGE_WORK_GROUP_SIZE = 512;
+    const int SORT_WORK_GROUP_SIZE = 64;
+    const int BATCHERMERGE_WORK_GROUP_SIZE = 128;
 
     // Length has to be dividable of 2048
-    readonly uint[] Indices = new uint[BATCHERMERGE_WORK_GROUP_SIZE];
-    readonly uint[] Distances = new uint[BATCHERMERGE_WORK_GROUP_SIZE];
+    readonly uint[] Indices = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 1000];
+    readonly uint[] Distances = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 1000];
 
     void Start()
     {
@@ -26,19 +26,17 @@ public class SortTester : MonoBehaviour
         for (uint i = 0; i < Indices.Length; i++)
         {
             Indices[i] = i;
-            Distances[i] = (uint)Random.Range(0, Indices.Length * 4);
+            Distances[i] = (uint)Random.Range(0, Distances.Length * 4);
         }
 
         // Debug only
-        ShowIndices();
+        ShowData();
 
         Debug.Log("Sorting...");
 
         // Create a Stopwatch instance
         Stopwatch stopwatch = new Stopwatch();
 
-        // Start the timer
-        stopwatch.Start();
 
         int sortKernelIndex = shader.FindKernel("Sort");
         int batcherKernelIndex = shader.FindKernel("BatcherMerge");
@@ -59,12 +57,16 @@ public class SortTester : MonoBehaviour
 
         int numThreadGroups = Mathf.CeilToInt((float) Indices.Length / SORT_WORK_GROUP_SIZE);
 
+        // Start the timer
+        stopwatch.Start();
+
         // SORT
         shader.Dispatch(sortKernelIndex, numThreadGroups, 1, 1);
 
         // DEBUG ONLY
-        //resultBuffer.GetIndices(Indices);
-        //ShowIndices();
+        //indicesBuffer.GetData(Indices);
+        //distancesBuffer.GetData(Distances);
+        //ShowData();
 
         Debug.Log("Merging...");
 
@@ -81,22 +83,25 @@ public class SortTester : MonoBehaviour
             shader.Dispatch(batcherKernelIndex, numThreadGroups, 1, 1);
 
             // DEBUG ONLY
-            //resultBuffer.GetIndices(Indices);
-            //Debug.Log("Merge pass " +  i + ":");
-            //ShowIndices();
+            //indicesBuffer.GetData(Indices);
+            //distancesBuffer.GetData(Distances);
+            //ShowData();
 
             isOddDispatch = !isOddDispatch;
         }
 
+        // Stop the timer
+        stopwatch.Stop();
+
         indicesBuffer.GetData(Indices);
-        indicesBuffer.GetData(Distances);
+        distancesBuffer.GetData(Distances);
 
         // Stop the timer
         stopwatch.Stop();
 
         // Output
         Debug.Log("Result:");
-        ShowIndices();
+        ShowData();
 
         // Get the elapsed time
         TimeSpan elapsedTime = stopwatch.Elapsed;
@@ -106,7 +111,7 @@ public class SortTester : MonoBehaviour
         Debug.Log("Execution Time: " + elapsedTime.TotalMilliseconds + " milliseconds");
     }
 
-    void ShowIndices()
+    void ShowData()
     {
         int errors = 0;
         List<uint> errorIndices = new List<uint>();
