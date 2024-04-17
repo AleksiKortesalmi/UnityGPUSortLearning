@@ -1,0 +1,19 @@
+// Even-odd sorting (the specific order in this paraller case, algorithm usually referred to as Odd-even)
+// https://www.youtube.com/watch?v=CfrEhUtGV-c
+
+// Constants
+#define THREAD_GROUP_SIZE 1024
+
+#pragma kernel Compute
+
+uniform StructuredBuffer<float3> Positions;
+uniform float3 Target;
+RWBuffer<uint> Indices;
+RWBuffer<float> Distances;
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void Compute(int3 id : SV_DispatchThreadID)
+{
+    Indices[id.x] = id.x;
+    Distances[id.x] = distance(Target, Positions[id.x]);
+}

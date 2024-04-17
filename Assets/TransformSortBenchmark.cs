@@ -18,8 +18,11 @@ public class TransformSortBenchmark : MonoBehaviour
     GameObject prefab;
     [SerializeField]
     TransformSortUtility sortUtility;
-    Transform[] array;
-    readonly List<Transform> list = new ();
+    [SerializeField]
+    SOTATransformSortUtility sotaSortUtility;
+    Transform[] gpuArray;
+    Transform[] cpuArray;
+    Transform[] sotaArray;
     Vector3 target = Vector3.zero;
     Stopwatch stopwatch = new Stopwatch();
     BenchmarkResult benchmarkResult = new ();
@@ -30,23 +33,28 @@ public class TransformSortBenchmark : MonoBehaviour
     {
         Init();
     }
-
     private void Init()
     {
         Debug.Log("Filling arrays with transforms, amount: " + startArrayLength);
 
         // Delete old instantiated objects
-        for (int i = 0; i < array?.Length; i++)
+        for (int i = 0; i < gpuArray?.Length; i++)
         {
-            Destroy(array[i].gameObject);
-            Destroy(list[i].gameObject);
+            Destroy(gpuArray[i].gameObject);
+            Destroy(cpuArray[i].gameObject);
         }
 
-        array = new Transform[startArrayLength];
-        list.Clear();
+        gpuArray = new Transform[startArrayLength];
+        cpuArray = new Transform[startArrayLength];
+        sotaArray = new Transform[startArrayLength];
 
-        sortUtility.Init(array.Length);
+        // GPU
+        sortUtility.Init(gpuArray.Length);
 
+        // SOTA GPU
+        sotaSortUtility.Init(sotaArray.Length);
+
+        // Benchmark result
         benchmarkResult.BatcherWorkGroupSize = GPUDistanceSort.MIN_ARRAY_LENGTH;
         benchmarkResult.GPUName = SystemInfo.graphicsDeviceName;
         benchmarkResult.CPUName = SystemInfo.processorType;
@@ -100,32 +108,34 @@ public class TransformSortBenchmark : MonoBehaviour
     {
         Debug.Log("Setting transforms to random positions");
         Vector3 pos;
-        if(list.Count == 0)
+        if (cpuArray[0] == null)
             for (int i = 0; i < startArrayLength; i++)
             {
                 pos = new Vector3(Random.Range(0.0f, 1000f), Random.Range(0.0f, 1000f), Random.Range(0.0f, 1000f));
-                array[i] = Instantiate(prefab, pos, Quaternion.identity, transform).GetComponent<Transform>();
-                list.Add(Instantiate(prefab, pos, Quaternion.identity, transform).GetComponent<Transform>());
+                gpuArray[i] = Instantiate(prefab, pos, Quaternion.identity, transform).GetComponent<Transform>();
+                cpuArray[i] = Instantiate(prefab, pos, Quaternion.identity, transform).GetComponent<Transform>();
+                sotaArray[i] = Instantiate(prefab, pos, Quaternion.identity, transform).GetComponent<Transform>();
             }
         else
             for (int i = 0; i < startArrayLength; i++)
             {
                 pos = new Vector3(Random.Range(0.0f, 1000f), Random.Range(0.0f, 1000f), Random.Range(0.0f, 1000f));
-                array[i].position = pos; 
-                list[i].position = pos;
+                gpuArray[i].position = pos; 
+                cpuArray[i].position = pos;
+                sotaArray[i].position = pos;
             }
     }
 
     BenchmarkPass Test()
     {
-        double gpuTime, cpuTime;
+        double gpuTime, cpuTime, sotaGPUTime;
 
         stopwatch.Reset();
 
         // Start the timer
         stopwatch.Start();
 
-        sortUtility.SortByDistance(ref array, target);
+        sortUtility.SortByDistance(ref gpuArray, target);
 
         // Stop the timer
         stopwatch.Stop();
@@ -134,7 +144,7 @@ public class TransformSortBenchmark : MonoBehaviour
         TimeSpan elapsedTime = stopwatch.Elapsed;
         gpuTime = elapsedTime.TotalMilliseconds;
 
-        Debug.Log(array.Length + " transforms sorted by distance");
+        Debug.Log(gpuArray.Length + " transforms sorted by distance, GPU");
         Debug.Log("GPU Execution Time: " + elapsedTime.TotalMilliseconds + " milliseconds");
 
         stopwatch.Reset();
@@ -151,14 +161,32 @@ public class TransformSortBenchmark : MonoBehaviour
         elapsedTime = stopwatch.Elapsed;
         cpuTime = elapsedTime.TotalMilliseconds;
 
+        Debug.Log(cpuArray.Length + " transforms sorted by distance, CPU");
         Debug.Log("CPU Execution Time: " + elapsedTime.TotalMilliseconds + " milliseconds");
+
+        stopwatch.Reset();
+
+        // Start the timer
+        stopwatch.Start();
+
+        sotaSortUtility.SortByDistance(ref sotaArray, target);
+
+        // Stop the timer
+        stopwatch.Stop();
+
+        // Get the elapsed time
+        elapsedTime = stopwatch.Elapsed;
+        sotaGPUTime = elapsedTime.TotalMilliseconds;
+
+        Debug.Log(sotaArray.Length + " transforms sorted by distance, SOTA GPU");
+        Debug.Log("SOTA GPU Execution Time: " + elapsedTime.TotalMilliseconds + " milliseconds");
 
         Debug.Log("Validation:");
         
         // CRASHES!!
         // ShowData();
 
-        BenchmarkPass result = new(counter, gpuTime, cpuTime);
+        BenchmarkPass result = new(counter, gpuTime, cpuTime, sotaGPUTime);
 
         // Update errors to result
         Validate(ref result);
@@ -168,7 +196,7 @@ public class TransformSortBenchmark : MonoBehaviour
 
     void SortCPU()
     {
-        list.Sort(CompareDistance);
+        Array.Sort(cpuArray, CompareDistance);
     }
 
     int CompareDistance(Transform a, Transform b)
@@ -182,30 +210,36 @@ public class TransformSortBenchmark : MonoBehaviour
     {
         for (int i = 0; i < startArrayLength; i += startArrayLength / 4)
         {
-            Debug.Log("i: " + i + ", GPU sorted pos: " + Vector3.Distance(array[i].position, target) + ", CPU sorted pos: " + Vector3.Distance(list[i].position, target));
+            Debug.Log("i: " + i + ", GPU sorted pos: " + Vector3.Distance(gpuArray[i].position, target) + ", CPU sorted pos: " + Vector3.Distance(cpuArray[i].position, target));
         }
     }
 
     void Validate(ref BenchmarkPass result)
     {
-        int gpuErrors = 0;
-        int cpuErrors = 0;
+        int gpuErrors = 0, cpuErrors = 0, sotaGPUErrors = 0;
         List<uint> gpuErrorIndices = new ();
         List<int> cpuErrorIndices = new ();
+        List<uint> sotaGPUErrorIndices = new();
 
         for (int i = 0; i < startArrayLength; i++)
         {
             // Rounded because of false errors
-            if (i + 1 < startArrayLength && Math.Round(Vector3.Distance(array[i + 1].position, target), 3) < Math.Round(Vector3.Distance(array[i].position, target), 3))
+            if (i + 1 < startArrayLength && Math.Round(Vector3.Distance(gpuArray[i + 1].position, target), 3) < Math.Round(Vector3.Distance(gpuArray[i].position, target), 3))
             {
                 gpuErrorIndices.Add((uint)i + 1);
                 gpuErrors++;
             }
 
-            if (i + 1 < startArrayLength && Math.Round(Vector3.Distance(list[i + 1].position, target), 3) < Math.Round(Vector3.Distance(list[i].position, target), 3))
+            if (i + 1 < startArrayLength && Math.Round(Vector3.Distance(cpuArray[i + 1].position, target), 3) < Math.Round(Vector3.Distance(cpuArray[i].position, target), 3))
             {
                 cpuErrorIndices.Add(i + 1);
                 cpuErrors++;
+            }
+
+            if (i + 1 < startArrayLength && Math.Round(Vector3.Distance(sotaArray[i + 1].position, target), 3) < Math.Round(Vector3.Distance(sotaArray[i].position, target), 3))
+            {
+                sotaGPUErrorIndices.Add((uint)i + 1);
+                sotaGPUErrors++;
             }
         }
 
@@ -223,40 +257,51 @@ public class TransformSortBenchmark : MonoBehaviour
             Debug.Log("At index: " + cpuErrorIndices[i] + ": " + Vector3.Distance(list[cpuErrorIndices[i]].position, target));
         }*/
 
+        Debug.Log(sotaGPUErrors + " sota gpu errors, indices: " + string.Join(", ", sotaGPUErrorIndices));
+
         result.GPUErrors = gpuErrors;
         result.CPUErrors = cpuErrors;
+        result.SOTAGPUErrors = sotaGPUErrors;
     }
 
     void ShowAverages(ref BenchmarkResult result)
     {
-        double gpuAverage = 0, cpuAverage = 0, gpuMin = double.MaxValue, gpuMax = double.MinValue, cpuMin = double.MaxValue, cpuMax = double.MinValue;
+        double gpuAverage = 0, cpuAverage = 0, sotaGPUAverage = 0, gpuMin = double.MaxValue, gpuMax = double.MinValue, cpuMin = double.MaxValue, cpuMax = double.MinValue, sotaGPUMin = double.MaxValue, sotaGPUMax = double.MinValue;
 
-        double gpuTime, cpuTime;
+        double gpuTime, cpuTime, sotaGPUTime;
         for (int i = 0; i < benchmarkResult.Passes.Length; i++)
         {
             gpuTime = benchmarkResult.Passes[i].GPUTime;
             cpuTime = benchmarkResult.Passes[i].CPUTime;
+            sotaGPUTime = benchmarkResult.Passes[i].SOTAGPUTime;
             gpuAverage += gpuTime;
             cpuAverage += cpuTime;
+            sotaGPUAverage += sotaGPUTime;
 
             if (gpuTime < gpuMin) gpuMin = gpuTime;
-            if (cpuTime < cpuMin) cpuMin = cpuTime;
             if (gpuTime > gpuMax) gpuMax = gpuTime;
+            if (cpuTime < cpuMin) cpuMin = cpuTime;
             if (cpuTime > cpuMax) cpuMax = cpuTime;
+            if (sotaGPUTime < sotaGPUMin) sotaGPUMin = cpuTime;
+            if (sotaGPUTime > sotaGPUMax) sotaGPUMax = cpuTime;
         }
 
         gpuAverage /= benchmarkResult.Passes.Length;
         cpuAverage /= benchmarkResult.Passes.Length;
+        sotaGPUAverage /= benchmarkResult.Passes.Length;
 
         Debug.Log("Results:");
-        Debug.Log("GPU average: " + gpuAverage + " milliseconds, CPU average: " + cpuAverage + " milliseconds");
+        Debug.Log("GPU average: " + gpuAverage + " milliseconds, CPU average: " + cpuAverage + " milliseconds, SOTA GPU average: " + sotaGPUAverage);
 
         result.GPUAverage = gpuAverage;
         result.CPUAverage = cpuAverage;
+        result.SOTAGPUAverage = sotaGPUAverage;
         result.GPUMin = gpuMin;
-        result.CPUMin = cpuMin;
         result.GPUMax = gpuMax;
+        result.CPUMin = cpuMin;
         result.CPUMax = cpuMax;
+        result.SOTAGPUMin = sotaGPUMin;
+        result.SOTAGPUMax = sotaGPUMax;
     }
 
     void SaveResults()
@@ -284,10 +329,13 @@ public class BenchmarkResult
 {
     public double GPUAverage;
     public double CPUAverage;
+    public double SOTAGPUAverage;
     public double GPUMin;
     public double GPUMax;
     public double CPUMin;
     public double CPUMax;
+    public double SOTAGPUMin;
+    public double SOTAGPUMax;
     public int BatcherWorkGroupSize;
     public string GPUName;
     public string CPUName;
@@ -301,20 +349,24 @@ public class BenchmarkResult
     [Serializable]
     public struct BenchmarkPass
     {
-        public BenchmarkPass(int index, double gPUTime, double cPUTime)
+        public BenchmarkPass(int index, double gPUTime, double cPUTime, double sotaGPUTime)
         {
             Index = index;
             GPUTime = gPUTime;
             CPUTime = cPUTime;
+            SOTAGPUTime = sotaGPUTime;
             GPUErrors = default;
             CPUErrors = default;
+            SOTAGPUErrors = default;
         }
 
         public int Index;
         public double GPUTime;
         public double CPUTime;
+        public double SOTAGPUTime;
         public int GPUErrors;
         public int CPUErrors;
+        public int SOTAGPUErrors;
     }
 }
 

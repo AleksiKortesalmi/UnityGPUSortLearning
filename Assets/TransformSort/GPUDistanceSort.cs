@@ -25,6 +25,7 @@ public class GPUDistanceSort : MonoBehaviour
 
     int sortKernelIndex, batcherKernelIndex;
 
+    // TODO: Convert to constructor
     public virtual void Init(int arrayLength)
     {
         indices = new uint[arrayLength];

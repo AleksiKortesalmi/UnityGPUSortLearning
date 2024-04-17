@@ -13,7 +13,6 @@ RWBuffer<uint> Data;
 
 groupshared uint SortPass[SORT_THREAD_GROUP_SIZE * 2];
 
-
 bool isOdd(uint value)
 {
     return value % 2;
