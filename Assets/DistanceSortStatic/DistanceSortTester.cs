@@ -11,12 +11,12 @@ public class DistanceSortTester : MonoBehaviour
     GraphicsBuffer indicesBuffer;
     GraphicsBuffer distancesBuffer;
 
-    const int SORT_WORK_GROUP_SIZE = 64;
-    const int BATCHERMERGE_WORK_GROUP_SIZE = 128;
+    const int SORT_WORK_GROUP_SIZE = 32;
+    const int BATCHERMERGE_WORK_GROUP_SIZE = 64;
 
     // Length has to be dividable of 2048
-    readonly uint[] Indices = new uint[154];
-    readonly uint[] Distances = new uint[154];
+    readonly uint[] Indices = new uint[2526];
+    readonly uint[] Distances = new uint[2526];
 
     void Start()
     {
@@ -96,9 +96,6 @@ public class DistanceSortTester : MonoBehaviour
         indicesBuffer.GetData(Indices);
         distancesBuffer.GetData(Distances);
 
-        // Stop the timer
-        stopwatch.Stop();
-
         // Output
         Debug.Log("Result:");
         ShowData();
@@ -126,7 +123,7 @@ public class DistanceSortTester : MonoBehaviour
             }
         }
 
-        for (int i = 0; i < Indices.Length; i += Indices.Length / 8)
+        for (int i = 0; i < Indices.Length; i += 1)
         {
             Debug.Log("i: " + i + ", index: " + Indices[i] + ", distance: " + Distances[i]);
         }
