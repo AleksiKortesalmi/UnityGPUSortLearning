@@ -18,8 +18,7 @@ public class GPUDistanceSort : MonoBehaviour
     const int SORT_WORK_GROUP_SIZE = 2 * SORT_THREAD_GROUP_SIZE;
     const int BATCHERMERGE_WORK_GROUP_SIZE = 2 * SORT_WORK_GROUP_SIZE;
 
-    const string CALC_IND_KERNEL_NAME = "CalcIndices";
-    const string CALC_DIST_KERNEL_NAME = "CalcDistances";
+    const string CALC_INDDIST_KERNEL_NAME = "CalcIndicesDistances";
     const string SORT_KERNEL_NAME = "Sort";
     const string BATCHERMERGE_KERNEL_NAME = "BatcherMerge";
     const string INDEX_BUFFER_NAME = "Indices";
@@ -36,7 +35,7 @@ public class GPUDistanceSort : MonoBehaviour
     Vector3[] Positions;
     readonly Vector3 target = Vector3.zero;
 
-    int sortKernelIndex, batcherKernelIndex, calcDistKernelIndex, calcIndKernelIndex;
+    int sortKernelIndex, batcherKernelIndex, calcIndDistKernelIndex;
 
     public virtual void Init(int arrayLength)
     {
@@ -44,8 +43,7 @@ public class GPUDistanceSort : MonoBehaviour
         Distances = new uint[arrayLength];
         Positions = new Vector3[arrayLength];
 
-        calcIndKernelIndex = shader.FindKernel(CALC_IND_KERNEL_NAME);
-        calcDistKernelIndex = shader.FindKernel(CALC_DIST_KERNEL_NAME);
+        calcIndDistKernelIndex = shader.FindKernel(CALC_INDDIST_KERNEL_NAME);
         sortKernelIndex = shader.FindKernel(SORT_KERNEL_NAME);
         batcherKernelIndex = shader.FindKernel(BATCHERMERGE_KERNEL_NAME);
 
@@ -54,24 +52,16 @@ public class GPUDistanceSort : MonoBehaviour
         distancesBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, Distances.Length, sizeof(uint));
         positionsBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, Positions.Length, sizeof(float) * 3);
 
-        int numThreadGroups = Mathf.CeilToInt((float)Indices.Length / CALC_THREAD_GROUP_SIZE);
-
-        // Set buffers for all kernels
-        shader.SetBuffer(calcIndKernelIndex, INDEX_BUFFER_NAME, indicesBuffer);
-
         shader.SetVector(TARGET_VARIABLE_NAME, target);
-        shader.SetBuffer(calcDistKernelIndex, POS_BUFFER_NAME, positionsBuffer);
-        shader.SetBuffer(calcDistKernelIndex, INDEX_BUFFER_NAME, indicesBuffer);
-        shader.SetBuffer(calcDistKernelIndex, DIST_BUFFER_NAME, distancesBuffer);
+        shader.SetBuffer(calcIndDistKernelIndex, POS_BUFFER_NAME, positionsBuffer);
+        shader.SetBuffer(calcIndDistKernelIndex, INDEX_BUFFER_NAME, indicesBuffer);
+        shader.SetBuffer(calcIndDistKernelIndex, DIST_BUFFER_NAME, distancesBuffer);
 
         shader.SetBuffer(sortKernelIndex, INDEX_BUFFER_NAME, indicesBuffer);
         shader.SetBuffer(sortKernelIndex, DIST_BUFFER_NAME, distancesBuffer);
 
         shader.SetBuffer(batcherKernelIndex, INDEX_BUFFER_NAME, indicesBuffer);
         shader.SetBuffer(batcherKernelIndex, DIST_BUFFER_NAME, distancesBuffer);
-
-        // INITIALIZE INDICES
-        shader.Dispatch(calcIndKernelIndex, numThreadGroups, 1, 1);
     }
 
     protected uint[] ComputeNonAlloc(ref Vector3[] posArray, Vector3 target)
@@ -82,8 +72,8 @@ public class GPUDistanceSort : MonoBehaviour
 
         int numThreadGroups = Mathf.CeilToInt((float) Indices.Length / CALC_THREAD_GROUP_SIZE);
 
-        // CALCULATE DISTANCES
-        shader.Dispatch(calcDistKernelIndex, numThreadGroups, 1, 1);
+        // CALCULATE INDICES & DISTANCES
+        shader.Dispatch(calcIndDistKernelIndex, numThreadGroups, 1, 1);
 
         numThreadGroups = Mathf.CeilToInt((float)Indices.Length / SORT_WORK_GROUP_SIZE);
 

@@ -1,33 +1,26 @@
 using System;
-using Unity.VisualScripting;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
 /// <summary>
 /// Sort Transform array by distance.
 /// </summary>
-public class TransformSortUtility : GPUDistanceSort
+public class SOTATransformSort : SOTADistanceSort
 {
     Vector3[] cache;
     Transform[] transformCache;
-
-    int lengthCompensation, originalLength;
-
-    int GetCompensation(int arrayLength) => MIN_ARRAY_LENGTH - arrayLength % MIN_ARRAY_LENGTH - arrayLength == MIN_ARRAY_LENGTH ? MIN_ARRAY_LENGTH : 0;
-    int GetCorrectedLength(int arrayLength) => GetCompensation(arrayLength) + arrayLength;
-    int CompensateIndex(int index) => index + lengthCompensation;
-    int DeCompensateIndex(uint index) => (int)index - lengthCompensation;
+    int originalLength;
 
     public override void Init(int arrayLength)
     {
         HandleChangedLength(arrayLength);
 
-        base.Init(GetCorrectedLength(arrayLength));
+        base.Init(arrayLength);
     }
 
     public void SortByDistance(ref Transform[] transformArray, Vector3 target)
     {
-        UpdateCache(ref transformArray, target);
+        UpdateCache(ref transformArray);
 
         ComputeNonAlloc(ref cache, target);
 
@@ -36,11 +29,11 @@ public class TransformSortUtility : GPUDistanceSort
 
         for (int i = 0; i < transformArray.Length; i++)
         {
-            transformArray[i] = transformCache[DeCompensateIndex(SortedIndices[CompensateIndex(i)])];
+            transformArray[i] = transformCache[SortedIndices[i]];
         }
     }
 
-    private void UpdateCache(ref Transform[] transformArray, Vector3 target)
+    private void UpdateCache(ref Transform[] transformArray)
     {
         if (cache == null)
             throw new Exception("Instance not initialized. Make sure to call Init() before.");
@@ -53,31 +46,22 @@ public class TransformSortUtility : GPUDistanceSort
             Debug.LogWarning("Resizing caches causes GC. Are you sure you don't need another instance?");
         }
 
-        // First fill compensation amount with the target position => distance 0
-        for (int i = 0; i < lengthCompensation; i++)
-        {
-            cache[i] = target;
-        }
-
-        // Then fill with actual positions
+        // Fill with positions
         for (int i = 0; i < transformArray.Length; i++)
         {
-            cache[CompensateIndex(i)] = transformArray[i].position;
+            cache[i] = transformArray[i].position;
         }
     }
 
     void HandleChangedLength(int newLength)
     {
         originalLength = newLength;
-        lengthCompensation = GetCompensation(newLength);
-
-        int correctedLength = GetCorrectedLength(newLength);
 
         // Position cache init/update
         if (cache != null)
-            Array.Resize(ref cache, correctedLength);
+            Array.Resize(ref cache, newLength);
         else
-            cache = new Vector3[correctedLength];
+            cache = new Vector3[newLength];
 
         // Transform cache init/update
         if (transformCache != null)

@@ -1,3 +1,6 @@
+// Runs benchmarks on my gpu transform sort implementation, Array.Sort and SOTA GPUSorting package based transform sorter simultaneously
+// from array length 64 to 1048576 and writes JSON reports in (Application.dataPath + /Data) path
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -17,9 +20,9 @@ public class TransformSortBenchmark : MonoBehaviour
     [SerializeField]
     GameObject prefab;
     [SerializeField]
-    TransformSortUtility sortUtility;
+    GPUTransformSort sortUtility;
     [SerializeField]
-    SOTATransformSortUtility sotaSortUtility;
+    SOTATransformSort sotaSortUtility;
     Transform[] gpuArray;
     Transform[] cpuArray;
     Transform[] sotaArray;

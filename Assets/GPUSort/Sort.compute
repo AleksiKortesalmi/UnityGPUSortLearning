@@ -1,29 +1,16 @@
-// Even-odd sorting (the specific order in this paraller case, algorithm usually referred to as Odd-even)
-// https://www.youtube.com/watch?v=CfrEhUtGV-c
+// THIS WAS ONLY FOR INITIAL TESTING WITH KEYS ONLY SORTING AND MIGHT INCLUDE RAMBLINGS
 
 // Constants
-#define SORT_THREAD_GROUP_SIZE 16
-#define BATCHER_THREAD_GROUP_SIZE 2 * SORT_THREAD_GROUP_SIZE
+#define SORT_THREAD_GROUP_SIZE 8
+#define BATCHER_THREAD_GROUP_SIZE 16
 
 #pragma kernel Sort
 #pragma kernel BatcherMerge
 
-uniform float3 Target;
-RWBuffer<uint> Indices;
-uniform StructuredBuffer<float3> Values;
+uniform uint Count;
+RWBuffer<uint> Data;
 
 groupshared uint SortPass[SORT_THREAD_GROUP_SIZE * 2];
-
-
-bool ShouldSwap(uint sourceValueIndex, uint destValueIndex)
-{
-    float srcDist = distance(Target, Values[sourceValueIndex]);
-    float destDist = distance(Target, Values[destValueIndex]);
-    
-    // If destination is further => swap
-    return destDist < srcDist ? true : false;
-}
-
 
 bool isOdd(uint value)
 {
@@ -38,7 +25,7 @@ bool isInSortBounds(uint value)
 void SortSwap(uint sourceIndex, uint destIndex)
 {
     uint swap = SortPass[sourceIndex];
-    if (ShouldSwap(SortPass[sourceIndex], SortPass[destIndex]))
+    if (SortPass[destIndex] < SortPass[sourceIndex])
     {
         SortPass[sourceIndex] = SortPass[destIndex];
         SortPass[destIndex] = swap;
@@ -53,8 +40,8 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
     
     // Populate groupshared memory with the 2 indices from data handled by this thread (0, 512 or 356, 868 or 511, 1023)
     uint groupIndexOffset = Gid.x * SORT_THREAD_GROUP_SIZE;
-    SortPass[GTid.x] = Indices[id.x + groupIndexOffset];
-    SortPass[GTid.x + SORT_THREAD_GROUP_SIZE] = Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
+    SortPass[GTid.x] = Data[id.x + groupIndexOffset];
+    SortPass[GTid.x + SORT_THREAD_GROUP_SIZE] = Data[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
     
     // Wait for others in the group
     GroupMemoryBarrierWithGroupSync();
@@ -67,7 +54,6 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
 
     uint sourceIndex = 0;
     uint destIndex = 0;
-    uint offset = 1;
     
     for (uint i = 0; i < passCount; i++)
     {
@@ -95,8 +81,8 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
     }
     
     // Output
-    Indices[id.x + groupIndexOffset] = SortPass[GTid.x];
-    Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPass[GTid.x + SORT_THREAD_GROUP_SIZE];
+    Data[id.x + groupIndexOffset] = SortPass[GTid.x];
+    Data[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPass[GTid.x + SORT_THREAD_GROUP_SIZE];
 }
 
 uniform bool isOddDispatch;
@@ -107,21 +93,20 @@ groupshared uint BatcherPass[BATCHER_THREAD_GROUP_SIZE * 2];
 void BatcherSwap(uint sourceIndex, uint destIndex)
 {
     uint swap = BatcherPass[sourceIndex];
-    if (ShouldSwap(BatcherPass[sourceIndex], BatcherPass[destIndex]))
+    if (BatcherPass[destIndex] < BatcherPass[sourceIndex])
     {
         BatcherPass[sourceIndex] = BatcherPass[destIndex];
         BatcherPass[destIndex] = swap;
     }
 }
 
-// TODO: FIX
 // Batcher's odd-even merge kernel
 // Double the size to merge 2 sorted sub arrays
-// TODO: Bitonic merge sort is more optimized than the current odd-even transposition
 [numthreads(BATCHER_THREAD_GROUP_SIZE, 1, 1)]
 void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
 {
-    // TODO: Handle the last group missing some values (basically determine the groupshared actual count)
+    // Populate groupshared memory with the 2 indices from Indices handled by this thread (0, 512 or 356, 868 or 511, 1023)
+    uint groupIndexOffset = Gid.x * BATCHER_THREAD_GROUP_SIZE;
     
     // Initialize group shared memory with dispatch-level subarray offset
     // Even pass doesn't have offset because it automically mixes subarrays of 512 in the "even" manner
@@ -131,10 +116,8 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     if (isOddDispatch && Gid.x == groupCount - 1)
         return;
     
-    // Populate groupshared memory with the 2 indices from data handled by this thread (0, 512 or 356, 868 or 511, 1023)
-    uint groupIndexOffset = Gid.x * BATCHER_THREAD_GROUP_SIZE;
-    BatcherPass[GTid.x] = Indices[id.x + groupIndexOffset + iOffset];
-    BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE] = Indices[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset];
+    BatcherPass[GTid.x] = Data[id.x + groupIndexOffset + iOffset];
+    BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE] = Data[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset];
     
     // Wait for others in the group
     GroupMemoryBarrierWithGroupSync();
@@ -142,6 +125,11 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     // Pass 1 = Compare same indices from the 2 subarrays
     // (even to even, odd to odd, example with sub arrays of length 8: 0 to 14 and 1 to 15 and 2 to 12...)
     uint subArrayLength = BATCHER_THREAD_GROUP_SIZE;
+    // Index of the subArray where this index should reside
+    uint subArrayIndex = floor(GTid.x / subArrayLength);
+    // Length of the array where the merging takes place
+    uint mergeArrayLength = subArrayLength * 2;
+    uint mergeArrayOffset = mergeArrayLength * subArrayIndex;
     
     uint sourceIndex = 0;
     uint destIndex = 0;
@@ -152,13 +140,13 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
         sourceIndex = GTid.x + sourceOffset;
         destIndex = sourceIndex + subArrayLength;
         
-        if(GTid.x < subArrayLength)
+        if (GTid.x < subArrayLength)
             BatcherSwap(sourceIndex, destIndex);
     
         GroupMemoryBarrierWithGroupSync();
     }
     
-    // Pass 2 = Odd pass
+    // Pass 3 = Odd pass
     // (even to even, odd to odd, 1 to 3 and 2 to 4 and 5 to 7...)
     sourceIndex = (GTid.x - 1) * 2 + 1;
     destIndex = sourceIndex + 1;
@@ -169,6 +157,6 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     GroupMemoryBarrierWithGroupSync();
     
     // Output
-    Indices[id.x + groupIndexOffset + iOffset] = BatcherPass[GTid.x];
-    Indices[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset] = BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE];
+    Data[id.x + groupIndexOffset + iOffset] = BatcherPass[GTid.x];
+    Data[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset] = BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE];
 }

@@ -26,12 +26,12 @@ public class BatcherMergeTest : MonoBehaviour
         // Create a Stopwatch instance
         Stopwatch stopwatch = new Stopwatch();
 
-        // Start the timer
-        stopwatch.Start();
-
         int batcherKernelIndex = shader.FindKernel("BatcherMerge");
 
         resultBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, data.Length, sizeof(uint));
+
+        // Start the timer
+        stopwatch.Start();
 
         resultBuffer.SetData(data);
 
@@ -48,6 +48,10 @@ public class BatcherMergeTest : MonoBehaviour
         {
             shader.SetBool("isOddDispatch", isOddDispatch);
             shader.Dispatch(batcherKernelIndex, numThreadGroups, 1, 1);
+
+            //Debug.Log("Pass_" + i);
+            //resultBuffer.GetData(data);
+            //ShowData();
 
             isOddDispatch = !isOddDispatch;
         }

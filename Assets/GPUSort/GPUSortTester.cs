@@ -10,8 +10,8 @@ public class GPUSortTester : MonoBehaviour
     [SerializeField] ComputeShader shader;
     [SerializeField] GraphicsBuffer resultBuffer;
 
-    const int SORT_WORK_GROUP_SIZE = 256;
-    const int BATCHERMERGE_WORK_GROUP_SIZE = 512;
+    const int SORT_WORK_GROUP_SIZE = 16;
+    const int BATCHERMERGE_WORK_GROUP_SIZE = 32;
 
     // Length has to be dividable of 2048
     readonly uint[] data = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 100];
