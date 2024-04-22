@@ -1,16 +1,36 @@
 // Even-odd sorting (the specific order in this paraller case, algorithm usually referred to as Odd-even)
+// Assumes element count to be dividable by BATCHER_THREAD_GROUP * 2
 // https://www.youtube.com/watch?v=CfrEhUtGV-c
 
 // Constants
+#define CALC_GROUP_SIZE 1024
 #define SORT_THREAD_GROUP_SIZE 16
 #define BATCHER_THREAD_GROUP_SIZE 32
 
+#pragma kernel CalcDistances
+#pragma kernel CalcIndices
 #pragma kernel Sort
 #pragma kernel BatcherMerge
+
+uniform float3 Target;
+RWStructuredBuffer<float3> Positions;
 
 uniform uint Count;
 RWBuffer<uint> Indices;
 RWBuffer<uint> Distances;
+
+[numthreads(CALC_GROUP_SIZE, 1, 1)]
+void CalcDistances(uint3 id : SV_DispatchThreadID)
+{
+    Indices[id.x] = id.x;
+    Distances[id.x] = asuint(distance(Target, Positions[id.x]));
+}
+
+[numthreads(CALC_GROUP_SIZE, 1, 1)]
+void CalcIndices(uint3 id : SV_DispatchThreadID)
+{
+    Indices[id.x] = id.x;
+}
 
 groupshared uint SortPass[SORT_THREAD_GROUP_SIZE * 2];
 groupshared uint SortPassDistances[SORT_THREAD_GROUP_SIZE * 2];
@@ -23,11 +43,6 @@ bool isOdd(uint value)
 bool isInSortBounds(uint value)
 {
     return value < SORT_THREAD_GROUP_SIZE * 2 && value >= 0;
-}
-
-bool isInGlobalBounds(uint value, uint groupIndexOffset)
-{
-    return value + groupIndexOffset * 2 < Count;
 }
 
 void SortSwap(uint sourceIndex, uint destIndex)
@@ -47,21 +62,14 @@ void SortSwap(uint sourceIndex, uint destIndex)
 [numthreads(SORT_THREAD_GROUP_SIZE, 1, 1)]
 void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
 {
-    // TODO: Handle the last group missing some values (basically determine the groupshared actual count)
-    
     // Populate groupshared memory with the 2 indices from Indices handled by this thread (0, 512 or 356, 868 or 511, 1023)
     uint groupIndexOffset = Gid.x * SORT_THREAD_GROUP_SIZE;
     
-    bool isInBounds = id.x < Count;
+    SortPass[GTid.x] = Indices[id.x + groupIndexOffset];
+    SortPass[GTid.x + SORT_THREAD_GROUP_SIZE] = Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
     
-    if (isInBounds)
-    {
-        SortPass[GTid.x] = Indices[id.x + groupIndexOffset];
-        SortPass[GTid.x + SORT_THREAD_GROUP_SIZE] = Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
-    
-        SortPassDistances[GTid.x] = Distances[id.x + groupIndexOffset];
-        SortPassDistances[GTid.x + SORT_THREAD_GROUP_SIZE] = Distances[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
-    }
+    SortPassDistances[GTid.x] = Distances[id.x + groupIndexOffset];
+    SortPassDistances[GTid.x + SORT_THREAD_GROUP_SIZE] = Distances[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
     
     // Wait for others in the group
     GroupMemoryBarrierWithGroupSync();
@@ -88,8 +96,7 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
         }
         
         // Try swap
-        if (isInGlobalBounds(sourceIndex, groupIndexOffset) && isInGlobalBounds(destIndex, groupIndexOffset))
-            SortSwap(sourceIndex, destIndex);
+        SortSwap(sourceIndex, destIndex);
     
         // Sync (make sure other threads are at the same point)
         // ONLY SYNCS THREADS IN 1 GROUP
@@ -101,15 +108,12 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
         isOddPass = !isOddPass;
     }
     
-    if (isInBounds)
-    {
-        // Output
-        Indices[id.x + groupIndexOffset] = SortPass[GTid.x];
-        Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPass[GTid.x + SORT_THREAD_GROUP_SIZE];
+    // Output
+    Indices[id.x + groupIndexOffset] = SortPass[GTid.x];
+    Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPass[GTid.x + SORT_THREAD_GROUP_SIZE];
     
-        Distances[id.x + groupIndexOffset] = SortPassDistances[GTid.x];
-        Distances[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPassDistances[GTid.x + SORT_THREAD_GROUP_SIZE];
-    }
+    Distances[id.x + groupIndexOffset] = SortPassDistances[GTid.x];
+    Distances[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPassDistances[GTid.x + SORT_THREAD_GROUP_SIZE];
 }
 
 uniform bool isOddDispatch;
@@ -131,15 +135,11 @@ void BatcherSwap(uint sourceIndex, uint destIndex)
     }
 }
 
-// TODO: FIX
 // Batcher's odd-even merge kernel
 // Double the size to merge 2 sorted sub arrays
-// TODO: Bitonic merge sort is more optimized than the current odd-even transposition
 [numthreads(BATCHER_THREAD_GROUP_SIZE, 1, 1)]
 void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
 {
-    // TODO: Handle the last group missing some values (basically determine the groupshared actual count)
-    
     // Populate groupshared memory with the 2 indices from Indices handled by this thread (0, 512 or 356, 868 or 511, 1023)
     uint groupIndexOffset = Gid.x * BATCHER_THREAD_GROUP_SIZE;
     
@@ -148,7 +148,7 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     // Odd pass offsets to right by subarray length and last thread group is skipped
     uint iOffset = isOddDispatch ? BATCHER_THREAD_GROUP_SIZE : 0;
     // Skip last thread group during Odd pass
-    if (isOddDispatch && Gid.x == groupCount - 1 || groupIndexOffset * 2 + iOffset + BATCHER_THREAD_GROUP_SIZE * 2 > Count)
+    if (isOddDispatch && Gid.x == groupCount - 1)
         return;
     
     BatcherPass[GTid.x] = Indices[id.x + groupIndexOffset + iOffset];

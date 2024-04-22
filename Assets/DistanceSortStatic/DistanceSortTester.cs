@@ -10,13 +10,17 @@ public class DistanceSortTester : MonoBehaviour
     [SerializeField] ComputeShader shader;
     GraphicsBuffer indicesBuffer;
     GraphicsBuffer distancesBuffer;
+    GraphicsBuffer positionsBuffer;
 
+    const int CALC_THREAD_GROUP_SIZE = 1024;
     const int SORT_WORK_GROUP_SIZE = 32;
     const int BATCHERMERGE_WORK_GROUP_SIZE = 64;
 
     // Length has to be dividable of 2048
-    readonly uint[] Indices = new uint[2526];
-    readonly uint[] Distances = new uint[2526];
+    readonly uint[] Indices = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 2];
+    readonly uint[] Distances = new uint[BATCHERMERGE_WORK_GROUP_SIZE * 2];
+    readonly Vector3[] Positions = new Vector3[BATCHERMERGE_WORK_GROUP_SIZE * 2];
+    readonly Vector3 target = Vector3.zero;
 
     void Start()
     {
@@ -25,8 +29,7 @@ public class DistanceSortTester : MonoBehaviour
         // Fill with worst case
         for (uint i = 0; i < Indices.Length; i++)
         {
-            Indices[i] = i;
-            Distances[i] = (uint)Random.Range(0, Distances.Length * 4);
+            Positions[i] = new Vector3(Random.Range(0.0f, Positions.Length * 4), Random.Range(0.0f, Positions.Length * 4), Random.Range(0.0f, Positions.Length * 4));
         }
 
         // Debug only
@@ -37,36 +40,50 @@ public class DistanceSortTester : MonoBehaviour
         // Create a Stopwatch instance
         Stopwatch stopwatch = new Stopwatch();
 
-
+        int calcIndicesKernelIndex = shader.FindKernel("CalcIndices");
+        int calcDistancesKernelIndex = shader.FindKernel("CalcDistances");
         int sortKernelIndex = shader.FindKernel("Sort");
         int batcherKernelIndex = shader.FindKernel("BatcherMerge");
 
         indicesBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, Indices.Length, sizeof(uint));
         distancesBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, Distances.Length, sizeof(uint));
+        positionsBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, Positions.Length, sizeof(float) * 3);
 
-        indicesBuffer.SetData(Indices);
-        distancesBuffer.SetData(Distances);
+        positionsBuffer.SetData(Positions);
+
+        shader.SetBuffer(calcIndicesKernelIndex, "Indices", indicesBuffer);
+
+        shader.SetVector("Target", target);
+        shader.SetBuffer(calcDistancesKernelIndex, "Positions", positionsBuffer);
+        shader.SetBuffer(calcDistancesKernelIndex, "Indices", indicesBuffer);
+        shader.SetBuffer(calcDistancesKernelIndex, "Distances", distancesBuffer);
 
         shader.SetBuffer(sortKernelIndex, "Indices", indicesBuffer);
-        shader.SetBuffer(batcherKernelIndex, "Indices", indicesBuffer);
-
         shader.SetBuffer(sortKernelIndex, "Distances", distancesBuffer);
+
+        shader.SetBuffer(batcherKernelIndex, "Indices", indicesBuffer);
         shader.SetBuffer(batcherKernelIndex, "Distances", distancesBuffer);
 
         shader.SetInt("Count", Indices.Length);
 
-        int numThreadGroups = Mathf.CeilToInt((float) Indices.Length / SORT_WORK_GROUP_SIZE);
+        int numThreadGroups = Mathf.CeilToInt((float) Indices.Length / CALC_THREAD_GROUP_SIZE);
+
+        // CALCULATE INDICES (would happen in init)
+        shader.Dispatch(calcIndicesKernelIndex, numThreadGroups, 1, 1);
 
         // Start the timer
         stopwatch.Start();
+
+        // CALCULATE DISTANCES
+        shader.Dispatch(calcDistancesKernelIndex, numThreadGroups, 1, 1);
 
         // SORT
         shader.Dispatch(sortKernelIndex, numThreadGroups, 1, 1);
 
         // DEBUG ONLY
-        indicesBuffer.GetData(Indices);
-        distancesBuffer.GetData(Distances);
-        ShowData();
+        //indicesBuffer.GetData(Indices);
+        //distancesBuffer.GetData(Distances);
+        //ShowData();
 
         Debug.Log("Merging...");
 
@@ -137,5 +154,7 @@ public class DistanceSortTester : MonoBehaviour
         indicesBuffer = null;
         distancesBuffer?.Release();
         distancesBuffer = null;
+        positionsBuffer?.Release();
+        positionsBuffer = null;
     }
 }

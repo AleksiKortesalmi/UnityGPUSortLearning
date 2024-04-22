@@ -311,16 +311,9 @@ public class TransformSortBenchmark : MonoBehaviour
         // Specify the file path to save JSON data
         string filePath = Path.Combine(Application.dataPath, "Data/" + DateTime.Now.ToString("s").Replace(":", "-") + "_Benchmark_" + startArrayLength.ToString() + ".json");
 
-        try
-        {
-            // Write JSON data to a file
-            File.WriteAllText(filePath, json);
-            Debug.Log("JSON data saved to file: " + filePath);
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError("Error: " + ex.Message);
-        }
+        // Write JSON data to a file
+        File.WriteAllText(filePath, json);
+        Debug.Log("JSON data saved to file: " + filePath);
     }
 }
 

@@ -13,7 +13,7 @@ public class TransformSortUtility : GPUDistanceSort
 
     int lengthCompensation, originalLength;
 
-    int GetCompensation(int arrayLength) => MIN_ARRAY_LENGTH - arrayLength % MIN_ARRAY_LENGTH;
+    int GetCompensation(int arrayLength) => MIN_ARRAY_LENGTH - arrayLength % MIN_ARRAY_LENGTH - arrayLength == MIN_ARRAY_LENGTH ? MIN_ARRAY_LENGTH : 0;
     int GetCorrectedLength(int arrayLength) => GetCompensation(arrayLength) + arrayLength;
     int CompensateIndex(int index) => index + lengthCompensation;
     int DeCompensateIndex(uint index) => (int)index - lengthCompensation;
