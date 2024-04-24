@@ -58,13 +58,15 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
     // Populate groupshared memory with the 2 indices from Indices handled by this thread (0, 512 or 356, 868 or 511, 1023)
     uint groupIndexOffset = Gid.x * SORT_THREAD_GROUP_SIZE;
     
+    // From global buffers to groupshared variables
     SortPass[GTid.x] = Indices[id.x + groupIndexOffset];
     SortPass[GTid.x + SORT_THREAD_GROUP_SIZE] = Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
     
     SortPassDistances[GTid.x] = Distances[id.x + groupIndexOffset];
     SortPassDistances[GTid.x + SORT_THREAD_GROUP_SIZE] = Distances[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE];
     
-    // Wait for others in the group
+    // Sync
+    // https://developer.download.nvidia.com/compute/DevZone/docs/html/DirectCompute/doc/DirectCompute_Programming_Guide.pdf
     GroupMemoryBarrierWithGroupSync();
     
     bool isOddPass = false;
@@ -88,20 +90,16 @@ void Sort(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 G
             destIndex = SORT_THREAD_GROUP_SIZE * 2 - 1;
         }
         
-        // Try swap
+        // Compare-Swap
         SortSwap(sourceIndex, destIndex);
     
-        // Sync (make sure other threads are at the same point)
-        // ONLY SYNCS THREADS IN 1 GROUP
-        // BEHAVIOUR IN DYNAMIC FLOW CONTROL UNDEFINED
-        // https://developer.download.nvidia.com/compute/DevZone/docs/html/DirectCompute/doc/DirectCompute_Programming_Guide.pdf
         GroupMemoryBarrierWithGroupSync();
         
         // Flip for next pass (Odd-Even)
         isOddPass = !isOddPass;
     }
     
-    // Output
+    // From groupshared variables back to global buffers
     Indices[id.x + groupIndexOffset] = SortPass[GTid.x];
     Indices[id.x + groupIndexOffset + SORT_THREAD_GROUP_SIZE] = SortPass[GTid.x + SORT_THREAD_GROUP_SIZE];
     
@@ -129,7 +127,7 @@ void BatcherSwap(uint sourceIndex, uint destIndex)
 }
 
 // Batcher's odd-even merge kernel
-// Double the size to merge 2 sorted sub arrays
+// Double the thread group size to merge 2 sorted sub arrays
 [numthreads(BATCHER_THREAD_GROUP_SIZE, 1, 1)]
 void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID, uint3 Gid : SV_GroupID)
 {
@@ -144,16 +142,16 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
     if (isOddDispatch && Gid.x == groupCount - 1)
         return;
     
+    // From global buffers to groupshared variables
     BatcherPass[GTid.x] = Indices[id.x + groupIndexOffset + iOffset];
     BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE] = Indices[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset];
     
     BatcherPassDistances[GTid.x] = Distances[id.x + groupIndexOffset + iOffset];
     BatcherPassDistances[GTid.x + BATCHER_THREAD_GROUP_SIZE] = Distances[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset];
     
-    // Wait for others in the group
     GroupMemoryBarrierWithGroupSync();
     
-    // Pass 1 = Compare same indices from the 2 subarrays
+    // Pass 1 = Compare same indices from the 2 subarrays with decreasing subarray length
     // (even to even, odd to odd, example with sub arrays of length 8: 0 to 14 and 1 to 15 and 2 to 12...)
     uint subArrayLength = BATCHER_THREAD_GROUP_SIZE;
     // Index of the subArray where this index should reside
@@ -171,23 +169,25 @@ void BatcherMerge(uint3 id : SV_DispatchThreadID, uint3 GTid : SV_GroupThreadID,
         sourceIndex = GTid.x + sourceOffset;
         destIndex = sourceIndex + subArrayLength;
         
-        if(GTid.x < subArrayLength)
+        if (GTid.x < subArrayLength)
+            // Compare-Swap
             BatcherSwap(sourceIndex, destIndex);
     
         GroupMemoryBarrierWithGroupSync();
     }
     
-    // Pass 3 = Odd pass
+    // Pass 2 = Odd pass
     // (even to even, odd to odd, 1 to 3 and 2 to 4 and 5 to 7...)
     sourceIndex = (GTid.x - 1) * 2 + 1;
     destIndex = sourceIndex + 1;
     
     if (GTid.x != 0)
+        // Compare-Swap
         BatcherSwap(sourceIndex, destIndex);
     
     GroupMemoryBarrierWithGroupSync();
     
-    // Output
+    // From groupshared variables back to global buffers
     Indices[id.x + groupIndexOffset + iOffset] = BatcherPass[GTid.x];
     Indices[id.x + groupIndexOffset + BATCHER_THREAD_GROUP_SIZE + iOffset] = BatcherPass[GTid.x + BATCHER_THREAD_GROUP_SIZE];
     
